@@ -1,6 +1,7 @@
 import math
 from josh_nlp import counts, probs
 from sklearn.metrics import confusion_matrix,accuracy_score
+import numpy as np
 
 class NaiveBayes:
 	def __init__(self, distribution_size = 2):
@@ -25,7 +26,7 @@ class NaiveBayes:
 		for c in self.categories:
 			c.calcPrior(numDocs, self.numCategories, class_prior_delta)
 
-		self.conditionals = probs.conditionalProbs(self.categories, cond_smoothing_prob, self.distributionSize)
+		self.conditionals = probs.conditionalProbs(self.categories, cond_smoothing_prob, self.distributionSize, docVectors)
 		for con in self.conditionals:
 			for concon in con:
 				if concon < 0:
@@ -76,16 +77,29 @@ class NaiveBayes:
 					vectorIndices.append(self.featureIndices[featureWord])
 			# Calculate probs for each category for this doc vector.
 			categoryProbs = {}
-			for cI in range(self.numCategories):
-				cTotal = self.categories[cI].prior
-				if self.distributionSize == 2:
+			if self.distributionSize == 2:
+				for cI in range(self.numCategories):
+					cTotal = self.categories[cI].prior
 					for featI in vectorIndices:
 						cTotal += self.conditionals[cI][featI] - self.unpresentConditionals[cI][featI]
 					cTotal += self.unpresentProbsProds[cI]
-				else:
-					for featI in vectorIndices:
-						cTotal += self.conditionals[cI][featI] * vector[featI]
-				categoryProbs[cI] = cTotal
+			else:
+				# But you need to get the log probability of the feature in each c. Then, subtract the greatest log from all three logs. Then, the solution is 10^log pc / sum 10^log pc_i
+				for cI in range(self.numCategories):
+					categoryProbs[cI] = self.categories[cI].prior
+				categoryFeatProbs = []
+				for featI in range(self.numFeatures):
+					# Avoid underflow
+					highestProb = -float("inf")
+					featCats = []
+					for cI in range(self.numCategories):
+						featCats.append(self.conditionals[cI][featI])
+						if self.conditionals[cI][featI] > highestProb:
+							highestProb = self.conditionals[cI][featI]
+					highestCat = np.argmax(featCats)
+					featCats = featCats-highestCat
+					for cI in range(self.numCategories):
+						categoryProbs[cI] += featCats[cI]
 
 			sysStr += "array:"+str(arrayNum)+" "+self.categoryNames[currAnswer]
 			arrayNum += 1
