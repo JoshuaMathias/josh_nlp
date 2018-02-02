@@ -1,5 +1,6 @@
 # Counting functions, such as for word, features, and classes.
 
+
 class Category:
 	def __init__(self, name):
 		self.name = name
@@ -7,14 +8,12 @@ class Category:
 		self.featureCounts = []
 		self.prior = 0
 
-
 	def addDoc(self, doc):
 		self.docs.append(doc)
 		# print("totalDocs: "+str(self.totalDocs))
 
 	def setDocs(self,docs):
 		self.docs = docs
-
 
 	def addFeatureCount(self,featureI):
 		if featureI >= len(self.featureCounts):
@@ -27,7 +26,7 @@ class Category:
 			self.featureCounts.append(0)
 		for doc in self.docs:
 			for i in range(featureNum-len(doc)+1):
-				doc.append(False)
+				doc.append(0)
 
 	def setfeatureCounts(self,featureCounts):
 		self.featureCounts = featureCounts
@@ -51,14 +50,11 @@ class Category:
 # Get feature and class/category counts.
 # Create document vectors, each of the same size (of features), with True for present features and False for unpresent features.
 # Return featureName, featureIndices, categoryNames, categoryIndices, docVectors
-def countBinaryClassFeatures(training_data):
-	train_lines = open(training_data,'r').readlines()
+def countBinaryClassFeatures(train_lines):
+	# train_lines = open(training_data,'r').readlines()
 	# Assign each feature an index.
 	featureIndices = {}
 	featureNames = []
-	# Get feature frequencies for each class
-	classVectors = {}
-	classCounts = {}
 	categories = []
 	categoryIndices = {}
 	categoryNames = []
@@ -78,7 +74,7 @@ def countBinaryClassFeatures(training_data):
 					categories.append(None)
 			categories[categoryNum] = Category(features[0])
 			categoryNum += 1
-		
+
 		train_answers.append(categoryIndices[features[0]])
 		category = categories[categoryIndices[features[0]]]
 		# print("Adding count for category "+features[0])
@@ -119,4 +115,5 @@ def countBinaryClassFeatures(training_data):
 		categoryNames[categoryIndices[categoryName]] = categoryName
 
 	return featureNames, featureIndices, categoryNames, categoryIndices, categories, docVectors
+
 
