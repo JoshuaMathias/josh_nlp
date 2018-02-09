@@ -2,6 +2,7 @@ import math
 from josh_nlp import counts, probs, parsing, similarities
 from sklearn.metrics import confusion_matrix,accuracy_score
 import numpy as np
+from scipy import spatial
 
 
 class NaiveBayes:
@@ -194,14 +195,16 @@ class KNN:
             for doc in self.docs:
                 simScore = 0
                 if isCosine:
-                    simScore = similarities.cosineSim(testDoc,doc)
+                    # simScore = similarities.cosineSim(testDoc,doc)
+                    simScore = spatial.distance.cosine(testDoc.getVector(), doc.getVector())
                 else:
                     simScore = similarities.euclideanDist(testDoc, doc)
+                    # np.linalg.norm(np.array(testDoc.getVector())-np.array(doc.getVector()))
                 doc.setScore(simScore)
                 # docScores.append(simScore)
 
             # For Euclidean: Smallest values
-            # For Cosine: Greatest values
+            # For Cosine: Greatest values (because we don't do 1 - value)
 
             if not isCosine:
                 for doc in self.docs:
@@ -215,9 +218,9 @@ class KNN:
 
             for voterI in kBest:
                 voter = self.docs[voterI]
-                # print("best doc score: "+str(voter.getScore()))
+                print("best doc score: "+str(voter.getScore()))
                 categoryProbs[self.categoryIndices[voter.getCategory()]] += 1
-            # print("category votes: "+str(categoryProbs))
+            print("category votes: "+str(categoryProbs))
             sysStr += "array:"+str(arrayNum)+" "+self.categoryNames[currAnswer]
             arrayNum += 1
 
@@ -235,7 +238,7 @@ class KNN:
         return accuracyToString(train_answers, train_predicted, test_answers, test_predicted, self.numCategories, self.categoryNames)
 
 
-# Calculate confusion matrices and accuracy scores and training and testing, and return a string showing results.
+# Calculate confusion matrices and accuracy scores for training and testing, and return a string showing results.
 def accuracyToString(train_answers, train_predicted, test_answers, test_predicted, numCategories, categoryNames):
     outStr = "Confusion matrix for the training data:\nrow is the truth, column is the system output\n\n\t"
     trainMatrix = confusion_matrix(train_answers, train_predicted)
@@ -254,6 +257,7 @@ def accuracyToString(train_answers, train_predicted, test_answers, test_predicte
     testMatrix = confusion_matrix(test_answers, test_predicted)
     for c in range(numCategories):
         outStr+=str(categoryNames[c])+" "
+    outStr += "\n"
     for c in range(numCategories):
         outStr+=str(categoryNames[c])+" "
         for c2 in range(numCategories):
@@ -263,3 +267,196 @@ def accuracyToString(train_answers, train_predicted, test_answers, test_predicte
 
     outStr += "Test accuracy="+'{0:.5f}'.format(accuracy_score(test_predicted,test_answers))
     return outStr
+
+
+# Calculate confusion matrices and accuracy scores for testing, and return a string showing results.
+def testAccuracyToString(test_answers, test_predicted, numCategories, categoryNames):
+    outStr = ""
+    outStr += "Confusion matrix for the test data:\nrow is the truth, column is the system output\n\n\t"
+    testMatrix = confusion_matrix(test_answers, test_predicted)
+    for c in range(numCategories):
+        outStr+=str(categoryNames[c])+" "
+    outStr += "\n"
+    for c in range(numCategories):
+        outStr+=str(categoryNames[c])+" "
+        for c2 in range(numCategories):
+            outStr+=str(testMatrix[c][c2])+" "
+        outStr += "\n"
+    outStr+="\n"
+
+    outStr += "Test accuracy="+'{0:.5f}'.format(accuracy_score(test_predicted,test_answers))
+    return outStr
+
+
+class MaxEnt:
+    def __init__(self):
+        self.categories = []
+        self.numFeatures = 0
+        self.numCategories = 0
+        self.featureIndices = {}
+        self.featureNames = []
+        self.categoryIndices = {}
+        self.categoryNames = []
+        self.docs = []
+        self.preparedCosine = False
+        self.featureWeights = []
+
+    def loadModel(self, model_filename):
+        modelFile = open(model_filename, 'r')
+        modelLines = modelFile.readlines()
+        modelFile.close()
+        currCategory = None
+        for line in modelLines:
+            splitLine = line.strip().split()
+
+            if line.startswith("FEATURES FOR CLASS"):
+                # if currCategory:
+                    # print("currCategory weights len: "+str(len(currCategory.getFeatureWeights())))
+                    # print("currCategory: "+str(currCategory))
+                    # self.categories.append(currCategory)
+
+                currCategory = counts.Category(splitLine[-1], index=self.numCategories)
+
+                self.categoryIndices[currCategory.getName()] = self.numCategories
+                self.categoryNames.append(currCategory.getName())
+                self.numCategories += 1
+                self.categories.append(currCategory)
+            elif splitLine[0] == "<default>":
+                currCategory.setPrior(float(splitLine[-1]))
+            else:
+                splitLine = line.split()
+                feature = splitLine[0]
+                weight = float(splitLine[1])
+                featI = -1
+                if feature not in self.featureIndices:
+                    self.featureIndices[feature] = self.numFeatures
+                    featI = self.numFeatures
+                    self.numFeatures += 1
+                else:
+                    featI = self.featureIndices[feature]
+                # print("featI: "+str(featI)+" feature: "+feature+" weight: "+str(weight))
+                currCategory.setFeatureWeight(featI, weight)
+        # print("numFeatures: "+str(self.numFeatures))
+        for cat in self.categories:
+            cat.extendNumWeights(self.numFeatures)
+            # print("new category: "+str(cat))
+
+    def test(self, test_lines):
+        test_predicted = []
+        test_answers = []
+        sysStr = ""
+        arrayNum = 0
+
+        for line in test_lines:
+            usedFeatures, currAnswer, currAnswerI = parsing.lineToVectorBinary(line, self.featureIndices, self.categoryIndices)
+            Z = 0
+            for category in self.categories:
+                featSum = 0
+                for featI in usedFeatures:
+                    featSum += category.getFeatureWeight(featI)
+                    numerator = math.exp(featSum)
+                    category.setScore(numerator)
+                    Z += numerator
+
+            for category in self.categories:
+                category.setScore(category.getScore() / Z)
+            sortedCategories = sorted(self.categories, reverse=True)
+            test_predicted.append(sortedCategories[0].getIndex())
+            test_answers.append(currAnswerI)
+            sysStr += "array:"+str(arrayNum)+" "+currAnswer
+            arrayNum += 1
+            for category in sortedCategories:
+                sysStr += " "+category.getName()+" "+str(category.getScore())
+            sysStr += "\n"
+            # break
+        return test_answers, test_predicted, sysStr
+
+    # Return catProbs
+    def getCondProbs(self, usedFeatures):
+        catProbs = []
+        Z = 0
+        for category in self.categories:
+            featSum = 0
+            for featI in usedFeatures:
+                featSum += category.getFeatureWeight(featI)
+                numerator = math.exp(featSum)
+                catProbs.append(numerator)
+                Z += numerator
+        for categoryI in range(len(self.categories)):
+            catProbs[categoryI] = (catProbs[categoryI] / Z)
+        return catProbs
+
+    def accuracyToString(self, test_answers, test_predicted):
+        return testAccuracyToString(test_answers, test_predicted, self.numCategories, self.categoryNames)
+
+
+# Calculate empirical expectation
+def calcEmpExpectation(train_lines):
+    featureNames, featureIndices, categoryNames, categoryIndices, categories, docVectors = counts.countBinaryClassFeatures(train_lines)
+    N = len(docVectors)
+
+    sortedFeatures = []
+    sortedNames = sorted(featureNames)
+    for featName in sortedNames:
+        featI = featureIndices[featName]
+        sortedFeatures.append((featI,featName))
+
+    sysStr = ""
+    for category in categories:
+        for feat in sortedFeatures:
+            featureCount = category.getFeatureCount(feat[0])
+            expect = featureCount / N
+            if not expect:
+                continue
+            sysStr += category.getName()+" "+feat[1]+" "+'{0:.5f}'.format(expect)+" "+str(featureCount)+"\n"
+    return sysStr
+
+
+# Calculate model expectation
+def calcModelExpectation(train_lines, model_filename):
+    featureNames, featureIndices, categoryNames, categoryIndices, categories, docVectors = counts.countBinaryClassFeatures(train_lines)
+    N = len(docVectors)
+
+    maxEnt = None
+    if model_filename:
+        maxEnt = MaxEnt()
+        maxEnt.loadModel(model_filename)
+
+    sortedFeatures = []
+    sortedNames = sorted(featureNames)
+    for featName in sortedNames:
+        featI = featureIndices[featName]
+        sortedFeatures.append((featI,featName))
+
+    model_expect = []
+    if maxEnt:
+        for catI in range(len(categories)):
+            catList = []
+            for featI in range(len(featureNames)):
+                catList.append(0)
+            model_expect.append(catList)
+        for line in train_lines:
+            usedFeatures, currAnswer, currAnswerI = parsing.lineToVectorBinary(line, featureIndices, categoryIndices)
+            catProbs = maxEnt.getCondProbs(usedFeatures)
+            for featureI in usedFeatures:
+                for categoryI in range(len(categoryNames)):
+                    model_expect[categoryI][featureI] += catProbs[categoryI]
+
+    sysStr = ""
+    defaultProb = 1 / len(categories)
+    categoryI = 0
+    for category in categories:
+        featI = 0
+        for feat in sortedFeatures:
+            featureCount = category.getFeatureCount(feat[0])
+            expect = featureCount / N
+            if maxEnt:
+                expect *= model_expect[categoryI][featI]
+            else:
+                expect *= defaultProb
+            if not expect:
+                continue
+            sysStr += category.getName()+" "+feat[1]+" "+'{0:.5f}'.format(expect)+" "+str(featureCount)+"\n"
+            featI += 1
+        categoryI += 1
+    return sysStr

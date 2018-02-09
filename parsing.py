@@ -146,3 +146,29 @@ def parseDocFeatureVectors(file_lines):
         categoryNames[categoryIndices[categoryName]] = categoryName
 
     return docs, featureNames, featureIndices, categoryNames, categoryIndices
+
+
+def lineToVectorBinary(line, featureIndices, categoryIndices):
+    lineFeatures = line.split()
+    docAnswer = lineFeatures[0]
+    docAnswerI = categoryIndices[docAnswer]
+    usedFeatures = []
+    for lineFeature in lineFeatures[1:]:
+        splitFeature = lineFeature.split(":")
+        featureWord = splitFeature[0]
+        if featureWord in featureIndices:
+            usedFeatures.append(featureIndices[featureWord])
+    return usedFeatures, docAnswer, docAnswerI
+
+
+# Store value of feature as a tuple (featureIndex, value) in usedFeatures
+def lineToVector(line, featureIndices, categoryIndices):
+    lineFeatures = line.split()
+    docAnswer = categoryIndices[lineFeatures[0]]
+    usedFeatures = []
+    for lineFeature in lineFeatures[1:]:
+        splitFeature = lineFeature.split(":")
+        featureWord = splitFeature[0]
+        if featureWord in featureIndices:
+            usedFeatures.append(featureIndices[featureWord], float(splitFeature[1]))
+    return usedFeatures, docAnswer
