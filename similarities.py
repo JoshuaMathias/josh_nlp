@@ -1,3 +1,5 @@
+import math
+
 # Utilities to calculate similariies
 
 
@@ -56,6 +58,7 @@ def cosineSim(first, second):
         multSum += first.getFeature(item) * second.getFeature(item)
         # print("multSum = "+str(multSum)+" after "+str(first.getFeature(item))+" * "+str(second.getFeature(item)))
     sim = multSum / (first.getSumSquares() * second.getSumSquares())
+    # print("denominator: "+str((math.sqrt(first.getSumSquares() * second.getSumSquares()))))
 
     return sim
 

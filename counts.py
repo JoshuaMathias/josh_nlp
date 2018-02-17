@@ -86,10 +86,10 @@ class Category:
 		return self.score
 
 	def __lt__(self, x):
-		return self.getScore() < x.getScore()
-
-	def __gt__(self, x):
 		return self.getScore() > x.getScore()
+
+	# def __gt__(self, x):
+	# 	return self.getScore() > x.getScore()
 
 	def __str__(self):
 		if self.featureWeights is None:

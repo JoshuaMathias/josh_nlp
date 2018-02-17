@@ -29,10 +29,6 @@ class NaiveBayes:
             c.calcPrior(numDocs, self.numCategories, class_prior_delta)
 
         self.conditionals = probs.conditionalProbs(self.categories, cond_smoothing_prob, self.distributionSize, docVectors)
-        for con in self.conditionals:
-            for concon in con:
-                if concon < 0:
-                    print("concon: "+str(concon))
 
     def prepareProbs(self):
         for con in self.conditionals:
@@ -56,13 +52,14 @@ class NaiveBayes:
                     currProd += catConditionals[featI]
                 self.unpresentProbsProds.append(currProd)
 
-    def test(self, test_data):
+    def test(self, test_lines):
 
         arrayNum = 0
-        test_lines = open(test_data,'r').readlines()
         test_answers = []
         test_predicted = []
         sysStr = ""
+        # print("num categories: "+str(len(self.categoryIndices)))
+        # print("categoryIndices: "+str(self.categoryIndices))
         for line in test_lines:
             lineFeatures = line.split()
             currAnswer = self.categoryIndices[lineFeatures[0]]
@@ -107,6 +104,7 @@ class NaiveBayes:
 
             # Sort category probabilities:
             categoryProbs = [(k, categoryProbs[k]) for k in sorted(categoryProbs, key=categoryProbs.get, reverse=True)]
+            print("category probs: "+str(categoryProbs))
             test_predicted.append(categoryProbs[0][0])
             for catProb in categoryProbs:
                 sysStr += " "+self.categoryNames[catProb[0]]+" "+'{0:.5f}'.format(catProb[1]) # Print logs prob
@@ -240,8 +238,9 @@ class KNN:
 
 # Calculate confusion matrices and accuracy scores for training and testing, and return a string showing results.
 def accuracyToString(train_answers, train_predicted, test_answers, test_predicted, numCategories, categoryNames):
+    labels = [i for i in range(numCategories)]
     outStr = "Confusion matrix for the training data:\nrow is the truth, column is the system output\n\n\t"
-    trainMatrix = confusion_matrix(train_answers, train_predicted)
+    trainMatrix = confusion_matrix(train_answers, train_predicted, labels=labels)
     for c in range(numCategories):
         outStr+=str(categoryNames[c])+" "
     outStr+="\n"
@@ -254,7 +253,7 @@ def accuracyToString(train_answers, train_predicted, test_answers, test_predicte
     outStr += "Training accuracy="+'{0:.5f}'.format(accuracy_score(train_predicted,train_answers))+"\n\n\n"
 
     outStr += "Confusion matrix for the test data:\nrow is the truth, column is the system output\n\n\t"
-    testMatrix = confusion_matrix(test_answers, test_predicted)
+    testMatrix = confusion_matrix(test_answers, test_predicted, labels=labels)
     for c in range(numCategories):
         outStr+=str(categoryNames[c])+" "
     outStr += "\n"
@@ -272,20 +271,72 @@ def accuracyToString(train_answers, train_predicted, test_answers, test_predicte
 # Calculate confusion matrices and accuracy scores for testing, and return a string showing results.
 def testAccuracyToString(test_answers, test_predicted, numCategories, categoryNames):
     outStr = ""
+    # print("test_answers: "+str(test_answers)+"\ntest_predicted: "+str(test_predicted))
     outStr += "Confusion matrix for the test data:\nrow is the truth, column is the system output\n\n\t"
-    testMatrix = confusion_matrix(test_answers, test_predicted)
+    labels = [i for i in range(numCategories)]
+    testMatrix = confusion_matrix(test_answers, test_predicted, labels=labels)
     for c in range(numCategories):
-        outStr+=str(categoryNames[c])+" "
+        outStr+=str(categoryNames[c])+"\t"
     outStr += "\n"
-    for c in range(numCategories):
-        outStr+=str(categoryNames[c])+" "
-        for c2 in range(numCategories):
-            outStr+=str(testMatrix[c][c2])+" "
+    for c in range(len(testMatrix)):
+        outStr+=str(categoryNames[c])+"\t"
+        for c2 in range(len(testMatrix[c])):
+            outStr+=str(testMatrix[c][c2])+"\t"
         outStr += "\n"
     outStr+="\n"
 
     outStr += "Test accuracy="+'{0:.5f}'.format(accuracy_score(test_predicted,test_answers))
     return outStr
+
+
+class BeamNode:
+    def __init__(self, prevNode, nextClass): # nextClass is a Category object
+        if prevNode:
+            self.classes = list(prevNode.getClasses())
+            self.classes.append((nextClass.getName(),nextClass.getIndex(),nextClass.getScore()))
+            self.prob = prevNode.getProb() + nextClass.getScore()
+            self.prevT = None
+            self.prevTwoTags = None
+        else:
+            self.classes = [(nextClass.getName(),nextClass.getIndex(),nextClass.getScore())]
+            self.classes.append((nextClass.getName(),nextClass.getIndex(),nextClass.getScore()))
+            self.prob = nextClass.getScore()
+            self.prevT = None
+            self.prevTwoTags = None
+
+    def getClasses(self):
+        return self.classes
+
+    def getProb(self):
+        return self.prob
+
+    def getPrevT(self):
+        if not self.prevT:
+            if len(self.classes):
+                self.prevT = "prevT="+self.classes[-1][0]
+            else:
+                self.prevT = "prevT=BOS"
+        return self.prevT
+
+    def getPrevTwoTags(self):
+        if not self.prevTwoTags:
+            featStr = "prevTwoTags="
+            if len(self.classes) > 1:
+                featStr += self.classes[-2][0]+"+"+self.classes[-1][0]
+            else:
+                featStr += "BOS+"
+                if len(self.classes):
+                    featStr += self.classes[-1][0]
+                else:
+                    featStr += "BOS"
+            self.prevTwoTags = featStr
+        return self.prevTwoTags
+
+    def __lt__(self, x):
+        return self.getProb() > x.getProb()
+
+    def __str__(self):
+        return "classes: "+str(self.classes)+"\nprob: "+str(self.prob)
 
 
 class MaxEnt:
@@ -369,6 +420,109 @@ class MaxEnt:
                 sysStr += " "+category.getName()+" "+str(category.getScore())
             sysStr += "\n"
             # break
+        return test_answers, test_predicted, sysStr
+
+    def testBeam(self, test_lines, boundary_lines, topN, topK, beam_size):
+        test_predicted = []
+        test_answers = []
+        sysStr = ""
+        currSentI = 0
+        currBoundary = int(boundary_lines[currSentI])
+        currWordI = 0
+        currAnswerI = None
+        currAnswer = None
+        topPaths = []
+        paths = []
+        paths.append(BeamNode(None,counts.Category("BOS")))
+        sentTokens = []
+
+        for line in test_lines:
+            token, usedFeatures, currAnswer, currAnswerI = parsing.wordFeaturesToVector(line, self.featureIndices, self.categoryIndices)
+            test_answers.append(currAnswerI)
+            sentTokens.append(token)
+
+            nextPaths = []
+            # print("paths before while loop: "+str(len(paths)))
+            while len(paths):
+                currPath = paths.pop()
+                # print("Used features: "+str(usedFeatures)+" currAnswer: "+str(currAnswer)+" currAnswerI: "+str(currAnswerI))
+                # Add prevT and prevTwoTags to calculation, for this specific path.
+                prevT = currPath.getPrevT()
+                prev2 = currPath.getPrevTwoTags()
+                # print("prevT: "+prevT+" prevTwoTags: "+prev2)
+
+                Z = 0
+                for category in self.categories:
+                    # Sum lamdas for all present features
+                    featSum = category.getPrior()
+                    for featI in usedFeatures:
+                        featSum += category.getFeatureWeight(featI)
+                    # Include prevT
+                    if prevT in self.featureIndices:
+                        featSum += category.getFeatureWeight(self.featureIndices[prevT])
+                    # Include prevTwoTags
+                    if prev2 in self.featureIndices:
+                        featSum += category.getFeatureWeight(self.featureIndices[prev2])
+
+                    featSum = math.exp(featSum)
+                    # print("category: "+str(category)+" numerator: "+str(featSum))
+                    category.setScore(featSum)
+                    Z += featSum
+
+                for category in self.categories:
+                    # print("category score: "+str(category.getScore()))
+                    category.setScore(math.log(category.getScore() / Z))
+
+                if len(self.categories) > topN:
+                    topCategories = np.argpartition(self.categories, topN)
+                    topCategories = topCategories[:topN]
+                for categoryI in topCategories:
+                    nextPaths.append(BeamNode(currPath, self.categories[categoryI]))
+
+            # print("next paths: "+str(len(nextPaths)))
+            topPaths = [i for i in range(len(nextPaths))] # Use all paths if there are not more than topK.
+            if len(nextPaths) > topK: # Prune paths
+                topPaths = np.argpartition(nextPaths, topK)
+                # print("topPaths before split: "+str(len(topPaths)))
+                topPaths = topPaths[:topK]
+            # print("topPaths: "+str(len(topPaths)))
+            prunedPaths = []
+            if len(topPaths):
+                max_prob = nextPaths[topPaths[0]].getProb()
+                # print("max prob: "+str(max_prob))
+                for pathI in topPaths:
+                    # print("Possible prob to add: "+str(nextPaths[pathI].getProb())+" plus beam: "+str(nextPaths[pathI].getProb() + beam_size))
+                    if nextPaths[pathI].getProb() + beam_size >= max_prob: # Probabilities are minused, for argpartition
+                        prunedPaths.append(nextPaths[pathI])
+                    else:
+                        break # It only gets worse at this point (top paths are sorted).
+            paths = prunedPaths
+            currWordI += 1
+            if not currWordI < currBoundary: # Are we past the last token of the last sentence?
+                # print("currWordI: "+str(currWordI)+" currBoundary: "+str(currBoundary))
+                # Choose the best final path, and output
+                if len(paths):
+                    classes = paths[0].getClasses()
+                    classI = 0
+                    for predicted in classes: # Output answer and prediction for each token in best path.
+                        if predicted[0] == "BOS": # Don't output BOS tags (doesn't correspond with a token)
+                            continue
+                        test_predicted.append(predicted[1])
+                        sysStr += str(currSentI)+"-"+str(classI)+"-"+sentTokens[classI]+" "+self.categoryNames[test_answers[-currBoundary+classI]]+" "+predicted[0]+" "+str(10**predicted[2])
+                        classI += 1
+                        sysStr += "\n"
+
+                # Start the next sentence
+                currWordI = 0
+                currSentI += 1
+                if currSentI < len(boundary_lines):
+                    currBoundary = int(boundary_lines[currSentI])
+                    paths = []
+                    paths.append(BeamNode(None,counts.Category("BOS")))
+                    sentTokens = []
+                else:
+                    break
+
         return test_answers, test_predicted, sysStr
 
     # Return catProbs
