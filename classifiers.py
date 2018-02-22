@@ -207,7 +207,7 @@ class KNN:
             if not isCosine:
                 for doc in self.docs:
                     doc.flipScore()
-            kBest = np.argpartition(self.docs, K)
+            kBest = np.argpartition(self.docs, range(K))
             kBest = kBest[:K]
 
             categoryProbs = {}
@@ -474,7 +474,7 @@ class MaxEnt:
                     category.setScore(math.log(category.getScore() / Z))
 
                 if len(self.categories) > topN:
-                    topCategories = np.argpartition(self.categories, topN)
+                    topCategories = np.argpartition(self.categories, range(topN))
                     topCategories = topCategories[:topN]
                 for categoryI in topCategories:
                     nextPaths.append(BeamNode(currPath, self.categories[categoryI]))
@@ -482,7 +482,7 @@ class MaxEnt:
             # print("next paths: "+str(len(nextPaths)))
             topPaths = [i for i in range(len(nextPaths))] # Use all paths if there are not more than topK.
             if len(nextPaths) > topK: # Prune paths
-                topPaths = np.argpartition(nextPaths, topK)
+                topPaths = np.argpartition(nextPaths, range(topK))
                 # print("topPaths before split: "+str(len(topPaths)))
                 topPaths = topPaths[:topK]
             # print("topPaths: "+str(len(topPaths)))
@@ -614,3 +614,71 @@ def calcModelExpectation(train_lines, model_filename):
             featI += 1
         categoryI += 1
     return sysStr
+
+
+class TBL:
+    def __init__(self):
+        self.categories = []
+        self.numFeatures = 0
+        self.numCategories = 0
+        self.featureIndices = {}
+        self.featureNames = []
+        self.categoryIndices = {}
+        self.categoryNames = []
+        self.docs = []
+        self.netGains = []
+        self.defaultLabelI = 0
+
+    # def __loadData(self, train_lines):
+
+    def train(self, train_lines, min_gain):
+        # loadData(train_lines)
+        print("train")
+        # Start with the label of the first training instance
+        self.docs, self.featureNames, self.featureIndices, self.categoryNames, self.categoryIndices = parsing.parseDocFeatureVectors(train_lines)
+        self.numFeatures = len(self.featureNames)
+        self.numCategories = len(self.categoryNames)
+        for i in range(self.numFeatures):
+            featList = []
+            for j in range(self.numCategories):
+                catList = []
+                for k in range(self.numCategories):
+                    catList.append(0)
+                featList.append(catList)
+            self.netGains.append(featList)
+        self.defaultLabelI = self.categoryIndices[self.docs[0].getCategory()]
+        nonDefaultLabels = []
+        for categoryI in range(self.numCategories):
+            if categoryI == self.defaultLabelI:
+                continue
+            nonDefaultLabels.append(categoryI)
+
+        # Calculate net gains of all transformations by updating feature counts for each training instance.
+        # TODO Loop len(transformations)
+        # TODO keep track of current labels for docs
+        
+        for doc in self.docs:
+            for featureI in range(self.numFeatures):
+                for label in nonDefaultLabels:
+                    docCatI = self.categoryIndices[doc.getCategory()]
+                    if self.defaultLabelI == docCatI:
+                        self.netGains[featureI][label] += 1
+                    else:
+                        self.netGains[featureI][label] -= 1
+
+    def test(self, test_lines):
+        print("test")
+
+    def saveModel(self, model_filename):
+        print("saveModel")
+        modelStr = ""
+        defaultLabel = self.categoryNames[self.defaultLabelI]
+        for featI in range(self.numFeatures):
+            for catI in range(1,self.numCategories):
+                modelStr += self.featureNames[featI]+" "+defaultLabel+" "+self.categoryNames[catI]+" "+str(self.netGains[featI][catI])+"\n"
+
+        modelFile = open(model_filename, 'w')
+        modelFile.write(modelStr)
+
+    def loadModel(self, model_filename):
+        print("loadModel")
