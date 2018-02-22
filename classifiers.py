@@ -616,6 +616,32 @@ def calcModelExpectation(train_lines, model_filename):
     return sysStr
 
 
+class Transformation:
+    def __init__(self, featI, fromLabelI, toLabelI):
+        self.featI = featI
+        self.fromLabelI = fromLabelI
+        self.toLabelI = toLabelI
+        self.score = 0
+
+    def increment(self):
+        self.score += 1
+
+    def decrement(self):
+        self.score -= 1
+
+    def getScore(self):
+        return self.score
+
+    def __lt__(self, x):
+        return self.getScore() < x.getScore()
+
+    def __gt__(self, x):
+        return self.getScore() > x.getScore()
+
+    def __str__(self):
+        return "Transformation: "+str(self.featI)+"_"+str(self.fromLabelI)+"_"+str(self.toLabelI)+" score: "+str(self.score)
+
+
 class TBL:
     def __init__(self):
         self.categories = []
@@ -628,12 +654,29 @@ class TBL:
         self.docs = []
         self.netGains = []
         self.defaultLabelI = 0
+        self.transformations = []
+        self.possibleTrans = {}
 
     # def __loadData(self, train_lines):
 
+    def findTrans(self, featI, fromLabelI, toLabelI):
+        transKey = str(featI)+"_"+str(fromLabelI)+"_"+str(toLabelI)
+        foundTrans = None
+        if transKey in self.possibleTrans:
+            foundTrans = self.possibleTrans[transKey]
+        else:
+            foundTrans = Transformation(featI, fromLabelI, toLabelI)
+            self.possibleTrans[transKey] = foundTrans
+        return foundTrans
+
+    def applyTrans(self, trans):
+        for doc in self.docs:
+            if doc.predictedLabelI == trans.fromLabelI and doc.getFeature(trans.featI):
+                doc.predictedLabelI = trans.toLabelI
+
     def train(self, train_lines, min_gain):
         # loadData(train_lines)
-        print("train")
+        # print("train")
         # Start with the label of the first training instance
         self.docs, self.featureNames, self.featureIndices, self.categoryNames, self.categoryIndices = parsing.parseDocFeatureVectors(train_lines)
         self.numFeatures = len(self.featureNames)
@@ -647,35 +690,68 @@ class TBL:
                 featList.append(catList)
             self.netGains.append(featList)
         self.defaultLabelI = self.categoryIndices[self.docs[0].getCategory()]
-        nonDefaultLabels = []
+        nonCurrentLabels = []
         for categoryI in range(self.numCategories):
             if categoryI == self.defaultLabelI:
                 continue
-            nonDefaultLabels.append(categoryI)
+            nonCurrentLabels.append(categoryI)
 
+        self.possibleTrans = {}
         # Calculate net gains of all transformations by updating feature counts for each training instance.
         # TODO Loop len(transformations)
         # TODO keep track of current labels for docs
-        
+
         for doc in self.docs:
-            for featureI in range(self.numFeatures):
-                for label in nonDefaultLabels:
-                    docCatI = self.categoryIndices[doc.getCategory()]
-                    if self.defaultLabelI == docCatI:
-                        self.netGains[featureI][label] += 1
+            doc.predictedLabelI = self.defaultLabelI
+            doc.categoryI = self.categoryIndices[doc.getCategory()]
+            goldLabelI = doc.categoryI
+            for featureI in doc.usedFeatures:
+                for toLabel in nonCurrentLabels:
+                    # if goldLabelI != 0:
+                    #     print("gold label: "+str(goldLabelI))
+                    #     print("to label: "+str(toLabel))
+                    if toLabel == goldLabelI:
+                        self.findTrans(featureI,doc.predictedLabelI,toLabel).increment()
                     else:
-                        self.netGains[featureI][label] -= 1
+                        self.findTrans(featureI,doc.predictedLabelI,toLabel).decrement()
+        # print("num transformations: "+str(len(self.possibleTrans)))
+
+        bestTrans = max(self.possibleTrans.values())
+        self.transformations.append(bestTrans)
+        # print("best trans: "+str(bestTrans))
+        self.applyTrans(bestTrans)
+
+        while bestTrans.score > min_gain:
+            self.possibleTrans = {}
+            for doc in self.docs:
+                nonCurrentLabels = []
+                for categoryI in range(self.numCategories):
+                    if categoryI == doc.predictedLabelI:
+                        continue
+                    nonCurrentLabels.append(categoryI)
+                goldLabelI = doc.categoryI
+                for featureI in doc.usedFeatures:
+                    for toLabel in nonCurrentLabels:
+                        goldLabelI = doc.categoryI
+                        if toLabel == goldLabelI:
+                            self.findTrans(featureI,doc.predictedLabelI,toLabel).increment()
+                        else:
+                            self.findTrans(featureI,doc.predictedLabelI,toLabel).decrement()
+            bestTrans = max(self.possibleTrans.values())
+            self.transformations.append(bestTrans)
+            # print("best trans: "+str(bestTrans))
+            self.applyTrans(bestTrans)
 
     def test(self, test_lines):
         print("test")
 
     def saveModel(self, model_filename):
-        print("saveModel")
+        # print("saveModel")
         modelStr = ""
         defaultLabel = self.categoryNames[self.defaultLabelI]
-        for featI in range(self.numFeatures):
-            for catI in range(1,self.numCategories):
-                modelStr += self.featureNames[featI]+" "+defaultLabel+" "+self.categoryNames[catI]+" "+str(self.netGains[featI][catI])+"\n"
+        modelStr += defaultLabel+"\n"
+        for trans in self.transformations:
+            modelStr += self.featureNames[trans.featI]+" "+self.categoryNames[trans.fromLabelI]+" "+self.categoryNames[trans.toLabelI]+" "+str(trans.score)+"\n"
 
         modelFile = open(model_filename, 'w')
         modelFile.write(modelStr)

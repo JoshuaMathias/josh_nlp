@@ -18,9 +18,11 @@ class Doc:
         self.vector = vector
         self.usedFeatures = usedFeatures
         self.category = category
+        self.categoryI = -1
         self.index = index
         self.sumSquares = None
         self.score = 0
+        self.predictedLabelI = -1
 
     # Assign this doc to the given category/class.
     def classify(self, newCategory):
