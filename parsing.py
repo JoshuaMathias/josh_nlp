@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 # Parsing and encoding utilities
 
@@ -147,6 +148,50 @@ def parseDocFeatureVectors(file_lines):
         categoryNames[categoryIndices[categoryName]] = categoryName
 
     return docs, featureNames, featureIndices, categoryNames, categoryIndices
+
+
+# Parse document vectors from format feat:num to a list of Doc
+# Add only those features given. Ignore all others.
+# Return docs
+def parseDocVectorsSpecificFeatures(file_lines, featureIndices, categoryIndices, categoryNames):
+    # train_lines = open(training_data,'r').readlines()
+
+    docs = []
+    docI = -1
+    numFeatures = len(featureIndices)
+    for line in file_lines:
+        docI += 1
+
+        features = line.split()
+        if len(features) == 0:
+            continue
+
+        docCategory = features[0]
+        # Initialize doc vector by size of given feature list.
+        docVector = np.zeros(numFeatures)
+        usedFeatures = []
+        for featureI in range(1,len(features)):
+            featureIndex = -1
+            splitFeature = features[featureI].split(":")
+            featureWord = splitFeature[0]
+
+            # Only include feature if it's in featureIndices
+            if featureWord in featureIndices:
+                featureIndex = featureIndices[featureWord]
+                usedFeatures.append(featureIndex)
+                docVector[featureIndex] = int(splitFeature[1])
+        newDoc = Doc(docVector, usedFeatures, docCategory, docI)
+        newDoc.predictedLabelI = 0
+        if docCategory in categoryIndices:
+            newDoc.categoryI = categoryIndices[docCategory]
+        else:
+            newCatI = len(categoryIndices)
+            categoryNames.append(docCategory)
+            categoryIndices[docCategory] = newCatI
+            newDoc.categoryI = newCatI
+        docs.append(newDoc)
+
+    return docs, categoryIndices, categoryNames
 
 
 def lineToVectorBinary(line, featureIndices, categoryIndices):

@@ -617,7 +617,7 @@ def calcModelExpectation(train_lines, model_filename):
 
 
 class Transformation:
-    def __init__(self, featI, fromLabelI, toLabelI):
+    def __init__(self, featI, fromLabelI, toLabelI, feat="", fromLabel="", toLabel=""):
         self.featI = featI
         self.fromLabelI = fromLabelI
         self.toLabelI = toLabelI
@@ -631,6 +631,14 @@ class Transformation:
 
     def getScore(self):
         return self.score
+
+    def setNames(self, feat="", fromLabel="", toLabel=""):
+        self.feat = feat
+        self.fromLabel = fromLabel
+        self.toLabel = toLabel
+
+    def format(self):
+        return self.feat+" "+self.fromLabel+" "+self.toLabel
 
     def __lt__(self, x):
         return self.getScore() < x.getScore()
@@ -654,10 +662,15 @@ class TBL:
         self.docs = []
         self.netGains = []
         self.defaultLabelI = 0
+        self.defaultLabel = ""
         self.transformations = []
         self.possibleTrans = {}
+        self.appliedDocs = []
 
     # def __loadData(self, train_lines):
+
+    def getTransKey(self, featI, fromLabelI, toLabelI):
+        return str(featI)+"_"+str(fromLabelI)+"_"+str(toLabelI)
 
     def findTrans(self, featI, fromLabelI, toLabelI):
         transKey = str(featI)+"_"+str(fromLabelI)+"_"+str(toLabelI)
@@ -681,14 +694,19 @@ class TBL:
         self.docs, self.featureNames, self.featureIndices, self.categoryNames, self.categoryIndices = parsing.parseDocFeatureVectors(train_lines)
         self.numFeatures = len(self.featureNames)
         self.numCategories = len(self.categoryNames)
-        for i in range(self.numFeatures):
-            featList = []
-            for j in range(self.numCategories):
-                catList = []
-                for k in range(self.numCategories):
-                    catList.append(0)
-                featList.append(catList)
-            self.netGains.append(featList)
+        # print("num docs: "+str(len(self.docs)))
+        # print("first doc: "+str(self.docs[0]))
+        # print("last doc: "+str(self.docs[-1]))
+        # print("last doc ignored: "+str(self.docs[-1].getFeature(self.featureIndices["ignored"])))
+        # for i in range(self.numFeatures):
+        #     featList = []
+        #     for j in range(self.numCategories):
+        #         catList = []
+        #         for k in range(self.numCategories):
+        #             catList.append(0)
+        #         featList.append(catList)
+        #     self.netGains.append(featList)
+
         self.defaultLabelI = self.categoryIndices[self.docs[0].getCategory()]
         nonCurrentLabels = []
         for categoryI in range(self.numCategories):
@@ -721,7 +739,7 @@ class TBL:
         # print("best trans: "+str(bestTrans))
         self.applyTrans(bestTrans)
 
-        while bestTrans.score > min_gain:
+        while bestTrans.score >= min_gain:
             self.possibleTrans = {}
             for doc in self.docs:
                 nonCurrentLabels = []
@@ -738,12 +756,42 @@ class TBL:
                         else:
                             self.findTrans(featureI,doc.predictedLabelI,toLabel).decrement()
             bestTrans = max(self.possibleTrans.values())
-            self.transformations.append(bestTrans)
-            # print("best trans: "+str(bestTrans))
-            self.applyTrans(bestTrans)
+            if bestTrans.score < min_gain:
+                break
+            else:
+                self.transformations.append(bestTrans)
+                # print("best trans: "+str(bestTrans))
+                self.applyTrans(bestTrans)
+
+    def applyTransformation(self, doc, trans):
+        # print("Attempting to apply trans "+str(trans.format()))
+        # print("predicted label: "+str(doc.predictedLabelI)+" trans label: "+str(trans.fromLabelI))
+
+        if doc.predictedLabelI == trans.fromLabelI and doc.getFeature(trans.featI):
+            # print("changing doc "+str(doc.index)+" from "+str(self.categoryNames[doc.predictedLabelI])+" to "+str(self.categoryNames[trans.toLabelI])+" due to feature "+str(self.featureNames[trans.featI]))
+            doc.predictedLabelI = trans.toLabelI
+            return True
+        return False
 
     def test(self, test_lines):
-        print("test")
+        self.docs, self.categoryIndices, self.categoryNames = parsing.parseDocVectorsSpecificFeatures(test_lines, self.featureIndices, self.categoryIndices, self.categoryNames)
+
+        test_answers = []
+        test_predicted = []
+        sysStr = ""
+
+        for doc in self.docs:
+            test_answers.append(doc.categoryI)
+            sysStr += "file"+str(doc.getIndex())+" "+str(doc.getCategory())+" "
+            transStr = ""
+            for trans in self.transformations:
+                if self.applyTransformation(doc, trans):
+                    transStr += " "+trans.format()
+            test_predicted.append(doc.predictedLabelI)
+            sysStr += str(self.categoryNames[doc.predictedLabelI])
+            sysStr += transStr+"\n"
+
+        return test_answers, test_predicted, sysStr
 
     def saveModel(self, model_filename):
         # print("saveModel")
@@ -756,5 +804,59 @@ class TBL:
         modelFile = open(model_filename, 'w')
         modelFile.write(modelStr)
 
-    def loadModel(self, model_filename):
-        print("loadModel")
+    def loadModel(self, model_filename, N):
+        self.transformations = []
+        transLines = open(model_filename, 'r').readlines()
+        self.featureIndices = {}
+        self.featureNames = []
+        self.categoryIndices = {}
+        self.categoryNames = []
+
+        self.defaultLabel = transLines[0].strip()
+        self.defaultLabelI = 0
+        self.categoryIndices[self.defaultLabel] = 0
+        self.categoryNames.append(self.defaultLabel)
+        featNum = 0
+        categoryNum = 1
+        transLines = transLines[1:]
+        if len(transLines) > N:
+            transLines = transLines[:N]
+        for trans in transLines:
+            splitTrans = trans.split()
+            feat = splitTrans[0]
+            fromLabel = splitTrans[1]
+            toLabel = splitTrans[2]
+            featI = -1
+            fromLabelI = -1
+            toLabelI = -1
+            if feat not in self.featureIndices:
+                self.featureIndices[feat] = featNum
+                self.featureNames.append(feat)
+                featI = featNum
+                featNum += 1
+            else:
+                featI = self.featureIndices[feat]
+
+            if fromLabel not in self.categoryIndices:
+                self.categoryIndices[fromLabel] = categoryNum
+                self.categoryNames.append(fromLabel)
+                fromLabelI = categoryNum
+                categoryNum += 1
+            else:
+                fromLabelI = self.categoryIndices[fromLabel]
+            if toLabel not in self.categoryIndices:
+                self.categoryIndices[toLabel] = categoryNum
+                self.categoryNames.append(toLabel)
+                toLabelI = categoryNum
+                categoryNum += 1
+            else:
+                toLabelI = self.categoryIndices[toLabel]
+            newTrans = Transformation(featI, fromLabelI, toLabelI)
+            newTrans.setNames(feat, fromLabel, toLabel)
+            self.transformations.append(newTrans)
+
+        self.numCategories = len(self.categoryIndices)
+        self.numFeatures = len(self.featureIndices)
+
+    def accuracyToString(self, test_answers, test_predicted):
+        return testAccuracyToString(test_answers, test_predicted, self.numCategories, self.categoryNames)
